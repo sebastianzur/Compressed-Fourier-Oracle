@@ -548,7 +548,7 @@ def Run_sim(eng):
 if __name__ == "__main__":
 
     # Create the compiler
-    eng = MainEngine(engine_list=[])
+    eng = MainEngine()
     
     # Choose what instance to run
     choice = True
