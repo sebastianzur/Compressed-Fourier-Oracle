@@ -554,18 +554,18 @@ if __name__ == "__main__":
     choice = True
     while choice:
         try:
-            run = int(input("For random test query type 1, for full simulation type 2\n"))
+            run = int(input("Press (0) for a random test query, or (1) for a full simulation"))
         except:
             sys.exit("faulty input, program terminated")
             
-        if run == 1:
+        if run == 0:
             choice = False
             # Sizes are fixed for random test query
             m = 2
             n = 1
             q = 3
             Run_test(eng)
-        elif run == 2:
+        elif run == 1:
             choice = False
             try:
                 m = int(input("X size: "))
