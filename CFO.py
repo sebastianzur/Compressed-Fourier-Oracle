@@ -1,6 +1,8 @@
 from projectq import MainEngine
-from projectq.ops import X, C, Measure, All, Swap, H
+from projectq.ops import X, C, Measure, All, Swap
 from projectq.meta import Control
+import random
+import sys
 
 # Locate X query in the database
 def Locate(eng, X_reg, D_reg, L_reg):
@@ -274,14 +276,12 @@ def Remove(eng, X_reg, D_reg, L_reg):
             # Find locations where query is larger than the database
             A_reg[i] = Larger(eng, X_reg, D_reg_X_i, A_reg[i])
             
-            # Extra work around if X = 0
-            All(X) | X_reg
-            # Correct for empty entries which have been modified during the query
-            with Control(eng, X_reg):
-                All(X) | D_reg_Y_i
-                C(X, n + 1) | (D_reg_Y_i + [L_reg[i]], A_reg[i])
-                All(X) | D_reg_Y_i
-            All(X) | X_reg
+            # Correct for empty entries which have not been modified during the query
+            X | L_reg[i]
+            All(X) | D_reg_Y_i
+            C(X, n + 1) | (D_reg_Y_i + [L_reg[i]], A_reg[i])
+            All(X) | D_reg_Y_i
+            X | L_reg[i]
             
             # Flip all lower bits, such that Hamming weight of A becomes 1 
             for j in reversed(range(i)):
@@ -366,8 +366,58 @@ def Cleanup(eng, Y_reg, D_reg, L_reg, A_reg):
     print("Finished Locate")        
     return A_reg
 
-# Test a single query to the database
-def Run_test(eng, X_reg, Y_reg, D_reg):
+# Test a random single query to the database
+def Run_test(eng):
+    
+    max_qubits = q * (n + m + 2) + (4 * m) + n + 1
+    
+    # Randomly fill register X
+    X_input = ''.join(str(random.randint(0, 1)) for _ in range(m))
+    X_reg = eng.allocate_qureg(m)
+    for i in range(m):
+        if X_input[i] == '1':
+            X | X_reg[i]
+        
+    # Randomly fill register Y
+    Y_input = ''.join('0' for _ in range(n))
+    zero = Y_input
+    # Zero not allowed
+    while Y_input == zero:
+        Y_input = ''.join(str(random.randint(0, 1)) for _ in range(n))
+    Y_reg = eng.allocate_qureg(n)
+    for i in range(n):
+        if Y_input[i] == '1':
+            X | Y_reg[i]
+            
+    # Randomly fill register D, apart from one empty entry
+    # Generate database x entries and order them
+    database_x = []
+    database_y = []
+    for i in range(0, q - 1):
+        D_input = ''.join(str(random.randint(0, 1)) for _ in range(m))
+        while D_input in database_x:
+            D_input = ''.join(str(random.randint(0, 1)) for _ in range(m))
+        database_x.append(D_input)
+        D_input = ''.join(str(random.randint(0, 1)) for _ in range(n))
+        # Zero not allowed
+        while D_input == zero:
+            D_input = ''.join(str(random.randint(0, 1)) for _ in range(n))
+        database_y.append(D_input)
+    database_x.sort()
+    
+    # Add one empty entry
+    database_x.append(''.join('0' for _ in range(m)))
+    database_y.append(''.join('0' for _ in range(n)))
+        
+    D_reg = eng.allocate_qureg((m + n) * q)
+    
+    for i in range(0, q - 1):
+        for j in range(m):
+            if database_x[i][j] == '1':
+                X | D_reg[(m + n) * i + j]
+        for j in range(n):
+            if database_y[i][j] == '1':
+                X | D_reg[(m + n) * i + j + m]
     
     # Auxilliary registers A, L
     A_reg = eng.allocate_qubit()
@@ -395,15 +445,29 @@ def Run_test(eng, X_reg, Y_reg, D_reg):
     
     # Measure the qubits
     All(Measure) | D_reg
+    All(Measure) | X_reg
+    All(Measure) | Y_reg
     
     # Execute Measurements
     eng.flush()
+    
+    # Print database before the query, this is classical!
+    print("\nDatabase before the query:")
     for i in range(q):
-        print("Entry " + str(i + 1) + ": {}".format([int(D_reg[j]) for j in \
-              range(len(D_reg)) if j >= (m + n) * i and j < (m + n) * (i + 1)]))
-    print("Number of qubits at max: " + str(q * (n + m + 1) + n + m + 1 + \
-          max(n, q + (3 * m))))
-
+        print("Entry " + str(i + 1) + ": {} | {}".format([int(database_x[i][j]) \
+              for j in range(m)], [int(database_y[i][j]) for j in range(n)]))
+    
+    # Print joint state after the query
+    print("Query" + ": {} | {}".format([int(X_reg[i]) for i in range(len(X_reg))], \
+           [int(Y_reg[i]) for i in range(len(Y_reg))]))
+    print("Database after the query:")
+    for i in range(q):
+        print("Entry " + str(i + 1) + ": {} | {}".format([int(D_reg[j]) for j \
+              in range(len(D_reg)) if j >= (m + n) * i and j < (m + n) * i + m], \
+              [int(D_reg[j]) for j in range(len(D_reg)) if j >= (m + n) * i + m \
+              and j < (m + n) * (i + 1)]))
+    print("Number of qubits used: " + str(max_qubits))
+    
 # Simulate multiple database queries   
 def Run_sim(eng):
     
@@ -423,16 +487,22 @@ def Run_sim(eng):
         X_input = input("Input the X register bitstring: ")
         X_reg = eng.allocate_qureg(m)
         for i in range(m):
-            if X_input[i] == '1':
-                X | X_reg[i]
+            try:
+                if X_input[i] == '1':
+                    X | X_reg[i]
+            except:
+                sys.exit("faulty input, program terminated")
         
         # Register Y
         Y_input = input("Input the Y register bitstring: ")
         Y_reg = eng.allocate_qureg(n)
         for i in range(n):
-            if Y_input[i] == '1':
-                X | Y_reg[i]
-        
+            try:
+                if Y_input[i] == '1':
+                    X | Y_reg[i]
+            except:
+                sys.exit("faulty input, program terminated")
+                
         # Locate X in the database
         L_reg = Locate(eng, X_reg, D_reg, L_reg)
         
@@ -465,19 +535,44 @@ def Run_sim(eng):
     # Measure the qubits
     All(Measure) | D_reg
     
-    # Execute Measurements
+    # Execute Measurements and print results
     eng.flush()
+    print("\nDatabase after the query:")
     for i in range(q):
-        print("Entry " + str(i + 1) + ": {}".format([int(D_reg[j]) for j in  \
-              range(len(D_reg)) if j >= (m + n) * i and j < (m + n) * (i + 1)]))
-    print("Number of qubits at max: " + str(max_qubits))
+        print("Entry " + str(i + 1) + ": {} | {}".format([int(D_reg[j]) for j \
+              in range(len(D_reg)) if j >= (m + n) * i and j < (m + n) * i + m], \
+              [int(D_reg[j]) for j in range(len(D_reg)) if j >= (m + n) * i + m \
+              and j < (m + n) * (i + 1)]))
+    print("Number of qubits used: " + str(max_qubits))
     
 if __name__ == "__main__":
 
     # Create the compiler
     eng = MainEngine(engine_list=[])
-    m = int(input("X size: "))
-    n = int(input("Y size: "))
-    q = int(input("Database size: "))
-    Run_sim(eng)
-
+    
+    # Choose what instance to run
+    choice = True
+    while choice:
+        try:
+            run = int(input("For random test query type 1, for full simulation type 2\n"))
+        except:
+            sys.exit("faulty input, program terminated")
+            
+        if run == 1:
+            choice = False
+            # Sizes are fixed for random test query
+            m = 2
+            n = 1
+            q = 3
+            Run_test(eng)
+        elif run == 2:
+            choice = False
+            try:
+                m = int(input("X size: "))
+                n = int(input("Y size: "))
+                q = int(input("Database size: "))
+            except:
+                sys.exit("faulty input, program terminated")
+            Run_sim(eng)
+        else:
+            print("Please type either 1 or 2\n")
